@@ -269,6 +269,7 @@ public class ConnectionQueryServicesImpl extends DelegateQueryServices implement
     private final boolean renewLeaseEnabled;
 
     private static volatile boolean isLoggedIn = false;
+    private static volatile String loggedInPrincipal = null;
     private static Object kerbLoginLock = new Object();
 
     private static interface FeatureSupported {
@@ -380,15 +381,24 @@ public class ConnectionQueryServicesImpl extends DelegateQueryServices implement
             // check if we need to authenticate with kerberos
             String clientKeytab = this.getProps().get(HBASE_CLIENT_KEYTAB);
             String clientPrincipal = this.getProps().get(HBASE_CLIENT_PRINCIPAL);
-            if (clientKeytab != null && clientPrincipal != null && !isLoggedIn) {
-                synchronized (kerbLoginLock) {
-                    if(!isLoggedIn) {
-                        logger.info("Trying to connect to a secure cluster with keytab:" + clientKeytab);
-                        UserGroupInformation.setConfiguration(config);
-                        User.login(config, HBASE_CLIENT_KEYTAB, HBASE_CLIENT_PRINCIPAL, null);
-                        logger.info("Successfull login to secure cluster!!");
-                        isLoggedIn = true;
+            if (clientKeytab != null && clientPrincipal != null) {
+                if(!isLoggedIn) {
+                    synchronized (kerbLoginLock) {
+                        if (!isLoggedIn) {
+                            logger.info("Trying to connect to a secure cluster with keytab:" + clientKeytab);
+                            UserGroupInformation.setConfiguration(config);
+                            User.login(config, HBASE_CLIENT_KEYTAB, HBASE_CLIENT_PRINCIPAL, null);
+                            logger.info("Successfull login to secure cluster!!");
+                            loggedInPrincipal = clientPrincipal;
+                            isLoggedIn = true;
+                        } else {
+                            if(!UserGroupInformation.getCurrentUser().getUserName().equals(clientPrincipal))
+                                throw new SQLException("Could not login from keytab, already logged in with a different user");
+                        }
                     }
+                } else {
+                    if(!loggedInPrincipal.equals(clientPrincipal))
+                        throw new SQLException("Could not login from keytab, already logged in with a different user");
                 }
             }
 			boolean transactionsEnabled = props.getBoolean(
